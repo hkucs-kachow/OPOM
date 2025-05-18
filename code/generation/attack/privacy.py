@@ -45,21 +45,22 @@ class convex_hull_cvx_dyn(nn.Module):
 
 class FIM(object):
     def __init__(self, step=10, epsilon=10, alpha=1, random_start=True,
-                 loss_type=0, nter=5000, upper=1.0, lower=0.0, device='cpu'):
+                 nter=5000, upper=1.0, lower=0.0, device='cpu'):
 
         self.step = step
         self.epsilon = epsilon
         self.alpha = alpha
         self.random_start = random_start
-        self.loss_type = loss_type
         self.lower = lower
         self.upper = upper
         self.nter = nter
         self.LossFunction = convex_hull_cvx_dyn(device)
 
-    def process(self, model, pdata):
+    def process(self, models, pdata):
         data = pdata.detach().clone()
-        original_features = model.forward(data)
+        original_features = []
+        for model in models:
+            original_features.append(model.forward(data))
 
         if self.random_start:
             torch.manual_seed(0)
@@ -70,16 +71,26 @@ class FIM(object):
 
         for i in range(self.step):
             data_adv.requires_grad_()
-            protected_features = model.forward(data_adv)
-            dis = cos_sim(protected_features.cpu().detach().numpy(), original_features.cpu().detach().numpy())
-            print("[Step %d/%d] Cosine Distance: %s" % (i+1, self.step, [round(v, 4) for v in dis]))
 
-            if i < self.nter:  # init several steps to push adv to the outside of the convexhull
-                loss = -self.LossFunction(protected_features, original_features, 1 / pdata.shape[0], 1 / pdata.shape[0])
-            else:
-                loss = -self.LossFunction(protected_features, original_features, self.lower, self.upper)
+            losses = []
+            for model_id, model in enumerate(models):
+                protected_features = model.forward(data_adv)
+                dis = cos_sim(protected_features.cpu().detach().numpy(),
+                              original_features[model_id].cpu().detach().numpy())
+                print("[Step %d/%d - Model %d] Cosine Distance: %s" % (i+1, self.step, model_id,
+                                                                       [round(v, 4) for v in dis]))
 
-            model.zero_grad()
+                if i < self.nter:  # init several steps to push adv to the outside of the convexhull
+                    loss = -self.LossFunction(protected_features, original_features[model_id],
+                                              1 / pdata.shape[0], 1 / pdata.shape[0])
+                else:
+                    loss = -self.LossFunction(protected_features, original_features[model_id],
+                                              self.lower, self.upper)
+                losses.append(loss)
+                model.zero_grad()
+            losses = torch.stack(losses)
+            print('  > Loss: %s' % losses)
+            loss = losses.mean()
             loss.backward(retain_graph=True)
             grad_step_mean = torch.mean(data_adv.grad, 0, keepdim=True)
             data_adv = data_adv.detach() + self.alpha * grad_step_mean.sign()

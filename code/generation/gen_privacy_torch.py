@@ -12,9 +12,18 @@ import os
 def main(args):
 
     # initialize the surrogate model
-    model = IR_50([112, 112])
-    model.load_state_dict(torch.load(args.pretrained, map_location=args.device))
-    model.eval()
+    pretrained_paths = [
+        '../../models/surrogate/IR_50-ArcFace-casia/Backbone_IR_50_Epoch_73_Batch_138000_Time_2020-05-07-23-48_checkpoint.pth',
+        '../../models/surrogate/IR_50-CosFace-casia/Backbone_IR_50_Epoch_74_Batch_140000_Time_2020-05-27-21-38_checkpoint.pth',
+        '../../models/surrogate/IR_50-Softmax-casia/Backbone_IR_50_Epoch_94_Batch_180000_Time_2020-03-30-01-55_checkpoint.pth'
+    ]
+    models = []
+    for pretrained_path in pretrained_paths:
+        print('Loading pretrained model: {}'.format(pretrained_path))
+        model = IR_50([112, 112])
+        model.load_state_dict(torch.load(pretrained_path, map_location=args.device))
+        model.eval()
+        models.append(model)
 
     # make the output dir of privacy masks
     if not os.path.exists(args.adv_out):
@@ -43,9 +52,9 @@ def main(args):
 
         # start generating the protection mask
         start_time = datetime.datetime.now()
-        fim = FIM(args.round, args.alpha, args.step_size, True, args.loss_type, args.nter, args.upper,
+        fim = FIM(args.round, args.alpha, args.step_size, True, args.nter, args.upper,
                   args.lower, args.device)
-        noise = fim.process(model, imgs)  # use the attack function
+        noise = fim.process(models, imgs)  # use the attack function
         end_time = datetime.datetime.now()
         print("  > Time consumed: %s" % (end_time - start_time))
 
@@ -58,8 +67,6 @@ def main(args):
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--pretrained', help='surrogate model',
-                        default='../../models/surrogate/IR_50-ArcFace-casia/Backbone_IR_50_Epoch_73_Batch_138000_Time_2020-05-07-23-48_checkpoint.pth')
     parser.add_argument('--adv_out', help='output dir of privacy masks', default='../../results')
     parser.add_argument('--target_lst', help='list of training images',
                         default='../../data/Privacy_common/privacy_train_v3_10.lst')
@@ -69,9 +76,6 @@ def parse_arguments(argv):
     parser.add_argument('--nter', type=int, help='initial iterations of convexhull', default=100)
     parser.add_argument('--upper', type=float, help='upper bound of reducedhull', default=1.0)
     parser.add_argument('--lower', type=float, help='lower bound of reducedhull', default=0.0)
-    parser.add_argument('--loss_type', type=int, help='type of approximation method:0-->FI-UAP; '
-                                                      '2-->FI-UAP+; 7-->OPOM-ClassCenter; 8-->OPOM-AffineHull;'
-                                                      '9-->OPOM-ConvexHull', default=9)
     parser.add_argument('--alpha', type=float, help='perturbation budeget', default=8)
     parser.add_argument('--step_size', type=float, help='gradient step size, defalt 1 in this work', default=1)
     parser.add_argument('--round', type=int, help='training iterations', default=50)
