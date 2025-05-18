@@ -1,0 +1,6 @@
+.idea
+data
+models
+results
+*.pyc
+*.DS_Store

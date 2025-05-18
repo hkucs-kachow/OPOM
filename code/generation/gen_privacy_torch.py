@@ -15,7 +15,7 @@ def main(args):
     time1 = datetime.datetime.now()
 
     # initialize the surrogate model
-    DEVICE = torch.device("cuda:0")
+    DEVICE = torch.device("cpu")
     model_root = args.pretrained
     if args.DFANet == 1:
         model = IR_50_drop([112, 112], args.droprate)
@@ -62,7 +62,7 @@ def main(args):
     else:
         model = IR_50([112, 112]),
         model = model[0]
-        model.load_state_dict(torch.load(model_root))
+        model.load_state_dict(torch.load(model_root, map_location=DEVICE))
         model = model.to(DEVICE)
 
     # make the output dir of privacy masks
@@ -73,7 +73,6 @@ def main(args):
     img_list = open(args.target_lst)
     files = img_list.readlines()
     print(len(files))
-
 
     i = 0
     np.random.seed(0)
@@ -116,10 +115,10 @@ def main(args):
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--pretrained', help='surrogate model', default='../results/IR_50-ArcFace-casia/Backbone_IR_50_Epoch_73_Batch_138000_Time_2020-05-07-23-48_checkpoint.pth')
+    parser.add_argument('--pretrained', help='surrogate model', default='../../models/surrogate/IR_50-ArcFace-casia/Backbone_IR_50_Epoch_73_Batch_138000_Time_2020-05-07-23-48_checkpoint.pth')
     parser.add_argument('--adv_out', help='output dir of privacy masks', default='./test')
-    parser.add_argument('--target_lst', help='list of training images', default='../list/privacy_train_v3_10.lst')
-    parser.add_argument('--data_dir', help='dir of training images', default='/ssd/')
+    parser.add_argument('--target_lst', help='list of training images', default='../../data/Privacy_common/privacy_train_v3_10.lst')
+    parser.add_argument('--data_dir', help='dir of training images', default='../../data/Privacy_common')
     parser.add_argument('--batch_size', type=int, help='number of samples to generate a mask', default=10)
     parser.add_argument('--num_shot', type=int, help='each identity has 10 training images', default=10)
     parser.add_argument('--nter', type=int, help='initial iterations of convexhull', default=100)
