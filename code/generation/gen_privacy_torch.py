@@ -14,6 +14,7 @@ def main(args):
     # initialize the surrogate model
     model = IR_50([112, 112])
     model.load_state_dict(torch.load(args.pretrained, map_location=args.device))
+    model.eval()
 
     # make the output dir of privacy masks
     if not os.path.exists(args.adv_out):

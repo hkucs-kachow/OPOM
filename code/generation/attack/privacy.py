@@ -1,15 +1,14 @@
-import torch
+from sklearn.preprocessing import normalize
 import torch.nn as nn
-import sklearn
-import sklearn.preprocessing
 import numpy as np
 import cvxpy as cp
+import torch
 
 
 def cos_sim(fea1, fea2):
     assert fea1.shape[0] == fea2.shape[0]
-    fea1 = sklearn.preprocessing.normalize(fea1)
-    fea2 = sklearn.preprocessing.normalize(fea2)
+    fea1 = normalize(fea1)
+    fea2 = normalize(fea2)
     similarity = []
     for i in range(fea1.shape[0]):
         similarity.append(np.sqrt(np.sum((fea1[i] - fea2[i]) * (fea1[i] - fea2[i]))))
@@ -25,35 +24,28 @@ class convex_hull_cvx_dyn(nn.Module):
     def forward(self, fea1, fea2, lower=0.0, upper=1.0):
         nfea1 = fea1 / torch.linalg.norm(fea1, dim=1).view(fea1.shape[0], 1)
         nfea2 = fea2 / torch.linalg.norm(fea2, dim=1).view(fea2.shape[0], 1)
-        # nfea2 --> A, nfea1 --> y, caculate x.
-        # Using cvx to calculate variable x
-        lowerbound = lower
-        upperbound = upper
+
         A = nfea2.detach().cpu().numpy()
         XX = torch.tensor(np.zeros((nfea1.shape[0], nfea1.shape[0])), dtype=torch.float32,
                           device=torch.device(self.device))
         for i in range(nfea1.shape[0]):
             y = nfea1[i].detach().cpu().numpy()
-
             x = cp.Variable(nfea1.shape[0])
-            # embed()
+
             objective = cp.Minimize(cp.sum_squares(x @ A - y))
-            constraints = [sum(x) == 1, lowerbound <= x, x <= upperbound]
+            constraints = [sum(x) == 1, lower <= x, x <= upper]
             prob = cp.Problem(objective, constraints)
-            print(i, "loss", prob.solve(), sum(x.value))
-            # embed()
-            print(i, "x:", x.value)
+            prob.solve()
+
             x_tensor = torch.tensor(x.value, dtype=torch.float32, device=torch.device(self.device))
             XX[i] = x_tensor
-        # embed()
-        DIS = - self.mse(torch.mm(XX.detach().to(fea1.device), nfea2), nfea1)
-        # embed()
-        return DIS
+        distance = -self.mse(torch.mm(XX.detach().to(fea1.device), nfea2), nfea1)
+        return distance
 
 
-class FIM():
-    def __init__(self, step=10, epsilon=10, alpha=1, random_start=True, loss_type=0, nter=5000, upper=1.0, lower=0.0,
-                 device='cpu'):
+class FIM(object):
+    def __init__(self, step=10, epsilon=10, alpha=1, random_start=True,
+                 loss_type=0, nter=5000, upper=1.0, lower=0.0, device='cpu'):
 
         self.step = step
         self.epsilon = epsilon
@@ -66,9 +58,8 @@ class FIM():
         self.LossFunction = convex_hull_cvx_dyn(device)
 
     def process(self, model, pdata):
-        model.eval()
         data = pdata.detach().clone()
-        nFeature = model.forward(data)
+        original_features = model.forward(data)
 
         if self.random_start:
             torch.manual_seed(0)
@@ -78,31 +69,24 @@ class FIM():
         data_adv = data_adv.detach()
 
         for i in range(self.step):
-
             data_adv.requires_grad_()
-            advFeature = model.forward(data_adv)
-            dis = cos_sim(advFeature.cpu().detach().numpy(), nFeature.cpu().detach().numpy())
-            print("step", i, dis)
-            # if i == self.step - 1:
-            #    print("step", i, dis)
-            if self.loss_type == 9:
-                if i < self.nter:  # init several steps to push adv to the outside of the convexhull
-                    Loss = -self.LossFunction(advFeature, nFeature, 1 / pdata.shape[0], 1 / pdata.shape[0])
-                else:
-                    Loss = -self.LossFunction(advFeature, nFeature, self.lower, self.upper)
-            elif self.loss_type == 7:  # center: use 1/pdata.shape[0] as the upper and lower bound
-                Loss = -self.LossFunction(advFeature, nFeature, 1 / pdata.shape[0], 1 / pdata.shape[0])
+            protected_features = model.forward(data_adv)
+            dis = cos_sim(protected_features.cpu().detach().numpy(), original_features.cpu().detach().numpy())
+            print("[Step %d/%d] Cosine Distance: %s" % (i+1, self.step, [round(v, 4) for v in dis]))
+
+            if i < self.nter:  # init several steps to push adv to the outside of the convexhull
+                loss = -self.LossFunction(protected_features, original_features, 1 / pdata.shape[0], 1 / pdata.shape[0])
             else:
-                Loss = -self.LossFunction(advFeature, nFeature)
+                loss = -self.LossFunction(protected_features, original_features, self.lower, self.upper)
 
             model.zero_grad()
-            Loss.backward(retain_graph=True)
+            loss.backward(retain_graph=True)
             grad_step_mean = torch.mean(data_adv.grad, 0, keepdim=True)
             data_adv = data_adv.detach() + self.alpha * grad_step_mean.sign()
 
-            deta = torch.mean(data_adv - data, 0, keepdim=True)
+            delta = torch.mean(data_adv - data, 0, keepdim=True)
 
-            eta = torch.clamp(deta, min=-self.epsilon, max=self.epsilon)
+            eta = torch.clamp(delta, min=-self.epsilon, max=self.epsilon)
             data_adv = torch.clamp(data + eta, 0, 255).detach()
 
         return eta
