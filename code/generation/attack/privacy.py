@@ -15,7 +15,7 @@ def cos_sim(fea1,fea2):
     return similarity
 
 class inverse_mse(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super(inverse_mse, self).__init__()
         self.mse = torch.nn.MSELoss()
 
@@ -26,7 +26,7 @@ class inverse_mse(nn.Module):
         return dis
 
 class eachother_dot(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super(eachother_dot, self).__init__()
         self.mse = torch.nn.MSELoss()
 
@@ -37,8 +37,9 @@ class eachother_dot(nn.Module):
         return dis
 
 class affine_hull_cvx(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super(affine_hull_cvx, self).__init__()
+        self.device = device
         self.mse = torch.nn.MSELoss()
 
     def forward(self, fea1, fea2):
@@ -48,7 +49,7 @@ class affine_hull_cvx(nn.Module):
         # Using cvx to calculate variable x
 
         A = nfea2.detach().cpu().numpy()
-        XX = torch.tensor(np.zeros((nfea1.shape[1],nfea1.shape[1])), dtype=torch.float32, device=torch.device("cuda:0"))
+        XX = torch.tensor(np.zeros((nfea1.shape[1],nfea1.shape[1])), dtype=torch.float32, device=torch.device(self.device))
         for i in range(nfea1.shape[1]):
             y = nfea1[:,i].detach().cpu().numpy()
 
@@ -58,15 +59,16 @@ class affine_hull_cvx(nn.Module):
             prob = cp.Problem(objective, constraints)
             print(i, "loss", prob.solve(), sum(x.value))
             print(i, "x:", x.value)
-            x_tensor = torch.tensor(x.value, dtype=torch.float32, device=torch.device("cuda:0"))
+            x_tensor = torch.tensor(x.value, dtype=torch.float32, device=torch.device(self.device))
             XX[:,i]= x_tensor
         #embed()
         DIS = - self.mse(torch.mm(nfea2, XX.detach()), nfea1)
         return DIS
 
 class convex_hull_cvx_dyn(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super(convex_hull_cvx_dyn, self).__init__()
+        self.device = device
         self.mse = torch.nn.MSELoss()
 
     def forward(self, fea1, fea2, lower = 0.0, upper = 1.0):
@@ -77,7 +79,7 @@ class convex_hull_cvx_dyn(nn.Module):
         lowerbound = lower
         upperbound = upper
         A = nfea2.detach().cpu().numpy()
-        XX = torch.tensor(np.zeros((nfea1.shape[0],nfea1.shape[0])), dtype=torch.float32, device=torch.device("cuda:0"))
+        XX = torch.tensor(np.zeros((nfea1.shape[0],nfea1.shape[0])), dtype=torch.float32, device=torch.device(self.device))
         for i in range(nfea1.shape[0]):
             y = nfea1[i].detach().cpu().numpy()
 
@@ -89,7 +91,7 @@ class convex_hull_cvx_dyn(nn.Module):
             print(i, "loss", prob.solve(), sum(x.value))
             #embed()
             print(i, "x:", x.value)
-            x_tensor = torch.tensor(x.value, dtype=torch.float32, device=torch.device("cuda:0"))
+            x_tensor = torch.tensor(x.value, dtype=torch.float32, device=torch.device(self.device))
             XX[i]= x_tensor
         #embed()
         DIS = - self.mse(torch.mm(XX.detach().to(fea1.device), nfea2), nfea1)
@@ -97,7 +99,7 @@ class convex_hull_cvx_dyn(nn.Module):
         return DIS
 
 class FIM():
-    def __init__(self, step = 10, epsilon = 10, alpha = 1, random_start = True, loss_type = 0, nter = 5000, upper = 1.0, lower = 0.0):
+    def __init__(self, step = 10, epsilon = 10, alpha = 1, random_start = True, loss_type = 0, nter = 5000, upper = 1.0, lower = 0.0, device='cpu'):
 
         self.step = step
         self.epsilon = epsilon
@@ -108,15 +110,15 @@ class FIM():
         self.upper = upper
         self.nter = nter
         if loss_type == 0: # FI-UAP
-            self.LossFunction = inverse_mse()
+            self.LossFunction = inverse_mse(device)
         elif loss_type == 2: # FI-UAP+
-            self.LossFunction = eachother_dot()
+            self.LossFunction = eachother_dot(device)
         elif loss_type == 7: # OPOM-ClassCenter
-            self.LossFunction = convex_hull_cvx_dyn()
+            self.LossFunction = convex_hull_cvx_dyn(device)
         elif loss_type == 8: # OPOM-AffineHull
-            self.LossFunction = affine_hull_cvx()
+            self.LossFunction = affine_hull_cvx(device)
         elif loss_type == 9: # OPOM-ConvexHull
-            self.LossFunction = convex_hull_cvx_dyn()
+            self.LossFunction = convex_hull_cvx_dyn(device)
 
     def process(self, model, pdata):
         model.eval()
@@ -161,7 +163,7 @@ class FIM():
         return eta
 
 class DFANet_MFIM():
-    def __init__(self, step = 10, epsilon = 10, alpha = 1, random_start = True, loss_type=3, nter = 5000, upper = 1.0, lower = 0.0):
+    def __init__(self, step = 10, epsilon = 10, alpha = 1, random_start = True, loss_type=3, nter = 5000, upper = 1.0, lower = 0.0, device='cpu'):
 
         self.loss_type = loss_type
         self.step = step
@@ -172,15 +174,15 @@ class DFANet_MFIM():
         self.upper = upper
         self.nter = nter
         if loss_type == 0: # FI-UAP
-            self.LossFunction = inverse_mse()
+            self.LossFunction = inverse_mse(device)
         elif loss_type == 2: # FI-UAP+
-            self.LossFunction = eachother_dot()
+            self.LossFunction = eachother_dot(device)
         elif loss_type == 7:  # OPOM-ClassCenter
-            self.LossFunction = convex_hull_cvx_dyn()
+            self.LossFunction = convex_hull_cvx_dyn(device)
         elif loss_type == 8: # OPOM-AffineHull
-            self.LossFunction = affine_hull_cvx()
+            self.LossFunction = affine_hull_cvx(device)
         elif loss_type == 9:  # OPOM-ConvexHull
-            self.LossFunction = convex_hull_cvx_dyn()
+            self.LossFunction = convex_hull_cvx_dyn(device)
 
 
     def process(self, model, model_ori, pdata):

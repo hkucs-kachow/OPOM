@@ -96,11 +96,11 @@ def main(args):
         IMG = torch.from_numpy(IMG)
         IMG = IMG.to(DEVICE)
 
-        if args.base == 1:
-            fim = FIM(args.round, args.alpha, args.step_size, True, args.loss_type, args.nter, args.upper, args.lower)
+        if args.DFANet == 0:
+            fim = FIM(args.round, args.alpha, args.step_size, True, args.loss_type, args.nter, args.upper, args.lower, DEVICE)
             noise = fim.process(model, IMG) #use the attack function
         else: #with momentum and DFANet
-            mfim = DFANet_MFIM(args.round, args.alpha, args.step_size, True, args.loss_type, args.nter, args.upper, args.lower)
+            mfim = DFANet_MFIM(args.round, args.alpha, args.step_size, True, args.loss_type, args.nter, args.upper, args.lower, DEVICE)
             noise = mfim.process(model, model_ori, IMG) #use the attack function
 
         noise_j = noise[0].cpu().detach().numpy()
